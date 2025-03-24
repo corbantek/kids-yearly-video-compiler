@@ -1,0 +1,13 @@
+[tool.ruff]
+line-length = 200
+ignore = ["D203"]
+show-source = true
+
+[tool.black]
+line-length = 200
+target-version = ['py39']
+
+[tool.pytest.ini_options]
+addopts = "-ra --cov"
+testpaths = ["tests"]
+pythonpath = ['.']
