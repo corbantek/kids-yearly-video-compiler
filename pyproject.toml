@@ -1,13 +1,22 @@
-[tool.ruff]
-line-length = 200
-ignore = ["D203"]
-show-source = true
+[tool.poetry]
+name = "kids-yearly-video-compiler"
+version = "0.0.1"
+description = "A tool to compile all my kids weekly videos into a yearly video"
+authors = ["Kyle Johnson"]
+readme = "README.md"
 
-[tool.black]
-line-length = 200
-target-version = ['py39']
+[tool.poetry.dependencies]
+python = "^3.8"
+ffmpeg-python = "^0.2.0"
 
-[tool.pytest.ini_options]
-addopts = "-ra --cov"
-testpaths = ["tests"]
-pythonpath = ['.']
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-cov = "^4.1.0"
+pytest-mock = "^3.11.1"
+
+[tool.poetry.scripts]
+kids-video-compiler = "kids_yearly_video_compiler.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

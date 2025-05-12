@@ -423,6 +423,3 @@ def constant_speed_up_algorithm(videos: Dict[str, VideoInfo], video_aggregation_
     # create timelapse video
     timelapse_partial_videos(video_aggregation_info, videos)
     combine_timelapase_video(videos)
-
-
-main()
