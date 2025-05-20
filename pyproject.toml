@@ -8,6 +8,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.8"
 ffmpeg-python = "^0.2.0"
+pyyaml = "^6.0.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
@@ -15,7 +16,7 @@ pytest-cov = "^4.1.0"
 pytest-mock = "^3.11.1"
 
 [tool.poetry.scripts]
-kids-video-compiler = "kids_yearly_video_compiler.cli:main"
+kyvc = "kids_yearly_video_compiler.cli:main"
 
 [build-system]
 requires = ["poetry-core"]

@@ -1,0 +1,15 @@
+OUTPUT_VIDEO_DIR: "/Users/kyjohnson/Development/Personal/kids-yearly-video-compiler/functional_tests/output/"
+INPUT_VIDEO_DIR: "/Users/kyjohnson/Development/Personal/kids-yearly-video-compiler/functional_tests/input/"
+SCRATCH_DIR: "/Users/kyjohnson/Development/Personal/kids-yearly-video-compiler/functional_tests/scratch/"
+TIMELAPSE_LENGTH: 15
+OUTPUT_WIDTH: 1920
+OUTPUT_HEIGHT: 1080
+BIRTHDAY: "2023-03-23"
+REVERSE: false
+LIST_WEEKS: true
+LIST_WEEKS_CENTERED: true
+NORMALIZE_ALGO: false
+CONSTANT_SPEED_UP_ALGO: true
+SPEED_UP_FACTOR: 0.13333333333333333
+HEAD_TAIL_RATIO: [2, 1]
+INSTAGRAM_STYLE: true

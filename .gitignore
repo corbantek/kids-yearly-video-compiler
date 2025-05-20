@@ -1,3 +1,6 @@
+# Non-template ignores
+functional_tests/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

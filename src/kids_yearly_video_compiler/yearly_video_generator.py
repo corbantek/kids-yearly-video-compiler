@@ -4,49 +4,47 @@ import sys
 from dataclasses import dataclass
 from datetime import date
 from typing import Dict, Sequence
+import yaml
 
 import ffmpeg
 
-#OUTPUT_VIDEO_DIR = "/Users/kyjohnson/Projects/penelope/"
-OUTPUT_VIDEO_DIR = "/Users/kyjohnson/Projects/millie/"
-INPUT_VIDEO_DIR = "/Volumes/Videos/Kids/MillieWeeklyVideos/"
-SCRATCH_DIR = OUTPUT_VIDEO_DIR + "scratch/"
-TIMELAPSE_LENGTH = 2 * 60  # 15 minutes default
-OUTPUT_WIDTH = 1920
-OUTPUT_HEIGHT = 1080
-#BIRTHDAY = date.fromisoformat("2021-06-23") # Penelope
-BIRTHDAY = date.fromisoformat("2023-03-23") # Millie
-REVERSE=False
+# Move all constants into a dictionary for YAML config
+DEFAULT_PREFERENCES = {
+    'OUTPUT_VIDEO_DIR': "./functional_tests/output/",
+    'INPUT_VIDEO_DIR': "./functional_tests/input/",
+    'SCRATCH_DIR': "./functional_tests/scratch/",
+    'TIMELAPSE_LENGTH': 15,
+    'OUTPUT_WIDTH': 1920,
+    'OUTPUT_HEIGHT': 1080,
+    'BIRTHDAY': "2023-03-23",
+    'REVERSE': False,
+    'LIST_WEEKS': True,
+    'LIST_WEEKS_CENTERED': True,
+    'NORMALIZE_ALGO': False,
+    'CONSTANT_SPEED_UP_ALGO': True,
+    'SPEED_UP_FACTOR': 1 / 7.5,
+    'HEAD_TAIL_RATIO': [2, 1],
+    'INSTAGRAM_STYLE': True,
+}
 
-LIST_WEEKS = True
-LIST_WEEKS_CENTERED = True
+PREFERENCES_PATH = os.path.join(os.path.dirname(__file__), 'preferences.yaml')
 
-# Normalize Video Lengths - Speed up all with Calculated Speed Up
-NORMALIZE_ALGO = False
-# Cut Video"s Constant with Constant Speed Up
-CONSTANT_SPEED_UP_ALGO = True
+# Load preferences from YAML if available
+if os.path.exists(PREFERENCES_PATH):
+    with open(PREFERENCES_PATH, 'r') as f:
+        user_prefs = yaml.safe_load(f)
+    PREFERENCES = {**DEFAULT_PREFERENCES, **(user_prefs or {})}
+else:
+    PREFERENCES = DEFAULT_PREFERENCES
 
-SPEED_UP_FACTOR = 1 / 7.5 # 7.5x default
-HEAD_TAIL_RATIO = (2, 1) # (4, 1) default
-
-INSTAGRAM_STYLE = True
-
-# Maybe try some video stabilization
-# The first pass ('detect') generates stabilization data and saves to `transforms.trf`
-# The `-f null -` tells ffmpeg there's no output video file
-#ffmpeg -i clip.mkv -vf vidstabdetect -f null -
-
-# The second pass ('transform') uses the .trf and creates the new stabilized video.
-#ffmpeg -i clip.mkv -vf vidstabtransform clip-stabilized.mkv
-
-# vertically stacked
-#ffmpeg -i clip.mkv -i clip-stabilized.mkv  -filter_complex vstack clips-stacked.mkv
-
-# side-by-side
-#ffmpeg -i clip.mkv -i clip-stabilized.mkv  -filter_complex hstack clips-sxs.mkv
-
-# NOTES
-# r="30000/1001" == NTSC
+# Assign variables from preferences
+globals().update(PREFERENCES)
+# Special handling for BIRTHDAY (convert from string to date)
+if isinstance(BIRTHDAY, str):
+    BIRTHDAY = date.fromisoformat(BIRTHDAY)
+# Special handling for HEAD_TAIL_RATIO (convert to tuple)
+if isinstance(HEAD_TAIL_RATIO, list):
+    HEAD_TAIL_RATIO = tuple(HEAD_TAIL_RATIO)
 
 @dataclass
 class VideoInfo:
@@ -342,7 +340,7 @@ def timelapse_partial_videos(
                 if INSTAGRAM_STYLE:
                     video_full = video_full.filter("crop", OUTPUT_HEIGHT*(9/16),OUTPUT_HEIGHT,(OUTPUT_WIDTH-(OUTPUT_HEIGHT*(9/16)))/2,0)
                 if not LIST_WEEKS_CENTERED:
-                    video_full = video_head.drawtext(
+                    video_full = video_full.drawtext(
                         text=timelapse_text,
                         x="w-tw-10",
                         y="h-th-10",
@@ -350,7 +348,7 @@ def timelapse_partial_videos(
                         fontcolor="white",
                     )
                 else:
-                    video_full = video_head.drawtext(
+                    video_full = video_full.drawtext(
                         text=timelapse_text,
                         x="(w-text_w)/2",
                         y="h-th-20",
