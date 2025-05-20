@@ -9,14 +9,9 @@ import ffmpeg
 from .configuration import load_configuration, Configuration
 import argparse
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description='Generate a yearly video timelapse.')
-    parser.add_argument('--config', type=str, help='Path to the configuration file (default: default-config.yaml)')
-    args = parser.parse_args()
-    config_path = args.config if args.config else None
+def main(config_path=None) -> None:
     global config
     config = load_configuration(config_path)
-
     # gather video information
     print(f"Gathering Video Information... Input Directory: {config.directories.input_videos}")
     video_file_names = [
