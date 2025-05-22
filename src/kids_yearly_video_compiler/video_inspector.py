@@ -1,7 +1,10 @@
 from datetime import date
 from dataclasses import dataclass
+import os
 import re
+from typing import List
 import ffmpeg
+
 
 @dataclass
 class VideoInfo:
@@ -29,17 +32,18 @@ class VideoInfo:
             return f"Year {year} / Week {week}"
 
 
-def get_all_video_info(path: str) -> Set[VideoInfo]:
+def get_all_video_info(path: str) -> List[VideoInfo]:
+    print(f"reading video input directory: {path}")
     video_file_names = [
         video_file_name
         for video_file_name in os.listdir(path)
         if os.path.isfile(path + "/" + video_file_name)
         and not video_file_name.startswith(".")
     ]
-    return {
-        video_file_name: get_video_info(path, video_file_name)
-        for video_file_name in video_file_names
-    }
+    return [
+        get_video_info(path, video_file_name) for video_file_name in video_file_names
+    ]
+
 
 def get_video_info(path: str, video_file_name: str) -> VideoInfo:
     video_file_path = f"{path}{video_file_name}"
@@ -62,6 +66,6 @@ def get_video_info(path: str, video_file_name: str) -> VideoInfo:
         duration=float(video["duration"]),
         width=int(video["width"]),
         height=int(video["height"]),
-        hdr=video["color_primaries"] == "bt2020", #"bt709",
+        hdr=video["color_primaries"] == "bt2020",  # "bt709" is for normal videos
         probe_info=video,
     )
