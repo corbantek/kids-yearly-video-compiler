@@ -8,22 +8,14 @@ import yaml
 import ffmpeg
 from .configuration import load_configuration, Configuration
 import argparse
+from .video_inspector import VideoInfo, get_all_video_info, get_video_info
 
 def main(config_path=None) -> None:
     global config
     config = load_configuration(config_path)
     # gather video information
     print(f"Gathering Video Information... Input Directory: {config.directories.input_videos}")
-    video_file_names = [
-        video_file_name
-        for video_file_name in os.listdir(config.directories.input_videos)
-        if os.path.isfile(config.directories.input_videos + "/" + video_file_name)
-        and not video_file_name.startswith(".")
-    ]
-    videos = {
-        video_file_name: get_video_info(config.directories.input_videos, video_file_name)
-        for video_file_name in video_file_names
-    }
+    videos = get_all_video_info(config.directories.input_videos)
     video_aggregation_info = get_video_aggregation_info(list(videos.values()))
     output_video_aggregation_info(video_aggregation_info)
 
@@ -31,18 +23,7 @@ def main(config_path=None) -> None:
         constant_speed_up_algorithm(videos, video_aggregation_info)
     if config.compiler_options.list_weeks:
         for video_key in sorted(videos.keys()):
-            print(f"{video_key} - {get_timelapse_text(videos[video_key])}")
-@dataclass
-class VideoInfo:
-    date_taken: date = date.today()
-    base_name: str = ""
-    file_path: str = ""
-    duration: float = 0.0
-    width: int = 0
-    height: int = 0
-    probe_info: dict = None
-    hdr: bool = False
-
+            print(f"{video_key} - {videos[video_key].get_since_birthday(config.kid_info.birthday)}")
 
 @dataclass
 class VideoAggregation:
@@ -53,49 +34,6 @@ class VideoAggregation:
     max_width: int = 0
     min_height: int = 0
     max_height: int = 0
-
-#def rename_videos(videos: List[VideoInfo]) -> None:
-
-def get_video_info(path: str, video_file_name: str) -> VideoInfo:
-    video_file_path = f"{path}{video_file_name}"
-    probe = ffmpeg.probe(video_file_path)
-    video = next(
-        (stream for stream in probe["streams"] if stream["codec_type"] == "video"), None
-    )
-    video_date = date.today()
-    regex = re.match(r".*?PXL_(\d\d\d\d)(\d\d)(\d\d).*", video_file_name)
-    if regex:
-        video_date = date.fromisoformat(
-            f"{regex.group(1)}-{regex.group(2)}-{regex.group(3)}"
-        )
-    if not video:
-        return VideoInfo()
-    return VideoInfo(
-        date_taken=video_date,
-        base_name=video_file_name,
-        file_path=video_file_path,
-        duration=float(video["duration"]),
-        width=int(video["width"]),
-        height=int(video["height"]),
-        hdr=video["color_primaries"] == "bt2020", #"bt709",
-        probe_info=video,
-    )
-
-
-def get_timelapse_text(video: VideoInfo) -> str:
-    days = video.date_taken - config.kid_info.birthday
-    week = days.days // 7
-    if week < 52:
-        if week == 0:
-            return f"Day {days.days}"
-        return f"Week {week}"
-    year = week // 52
-    week = week % 52
-    if week == 0:
-        return f"Year {year}"
-    else:
-        return f"Year {year} / Week {week}"
-
 
 def get_video_aggregation_info(videos: Sequence[VideoInfo]) -> VideoAggregation:
     # TODO Calculate Standard Deviation
@@ -130,31 +68,6 @@ def output_video_aggregation_info(video_aggregation_info: VideoAggregation) -> N
         f"max width/height: {video_aggregation_info.max_width} / {video_aggregation_info.max_height}"
     )
 
-def timelapse_full_videos(
-    video_aggregation_info: VideoAggregation, videos: Dict[str, VideoInfo]
-) -> Dict[str, VideoInfo]:
-    speed_up_factor: float = config.timelapse_video.length / video_aggregation_info.total_duration
-    for key, video in videos.items():
-        output_file_name = f"timelapse_{video.base_name}"
-        output_file_path = f"{config.directories.scratch}{output_file_name}"
-        if not os.path.isfile(output_file_path):
-            (
-                ffmpeg.input(video.file_path)
-                .filter("setpts", str(speed_up_factor) + "*PTS")
-                .filter("scale", config.timelapse_video.max_width, -1)
-                .drawtext(
-                    text=get_timelapse_text(video),
-                    x="w-tw-10",
-                    y="h-th-10",
-                    fontsize=36,
-                    fontcolor="white",
-                )
-                .output(output_file_path, r="30000/1001")
-                .run()
-            )
-        videos[key] = get_video_info(config.directories.scratch, output_file_name)
-    return videos
-
 def timelapse_partial_videos(
         video_aggregation_info: VideoAggregation, videos: Dict[str, VideoInfo]
 ) -> Dict[str, VideoInfo]:
@@ -165,7 +78,7 @@ def timelapse_partial_videos(
         video = videos[key]
         output_file_name = f"timelapse_{video.base_name}"
         output_file_path = f"{config.directories.scratch}{output_file_name}"
-        timelapse_text = get_timelapse_text(video)
+        timelapse_text = video.get_since_birthday(config.kid_info.birthday)
         if not os.path.isfile(output_file_path):
             if video.duration > max_video_length:
                 video_head = (
@@ -302,19 +215,6 @@ def combine_timelapase_video(videos: Dict[str, VideoInfo]) -> None:
         .overwrite_output()
         .run()
     )
-
-def normalize_video_algorithm(videos: Dict[str, VideoInfo], video_aggregation_info: VideoAggregation) -> None:
-    # normalize video length (reduce excessively long videos)
-    videos = {
-        video_file_name: normalize_video_length(video_aggregation_info, video)
-        for video_file_name, video in videos.items()
-    }
-    # update the video aggreation info
-    video_aggregation_info = get_video_aggregation_info(list(videos.values()))
-    output_video_aggregation_info(video_aggregation_info)
-    # create timelapse video
-    timelapse_full_videos(video_aggregation_info, videos)
-    combine_timelapase_video(videos)
 
 def constant_speed_up_algorithm(videos: Dict[str, VideoInfo], video_aggregation_info: VideoAggregation) -> None:
     # create timelapse video
