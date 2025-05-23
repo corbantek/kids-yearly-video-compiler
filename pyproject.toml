@@ -16,7 +16,7 @@ pytest-cov = "^4.1.0"
 pytest-mock = "^3.11.1"
 
 [tool.poetry.scripts]
-kyvc = "kids_yearly_video_compiler.cli:main"
+kyvc = "kids_yearly_video_compiler.cli:cli"
 
 [build-system]
 requires = ["poetry-core"]
