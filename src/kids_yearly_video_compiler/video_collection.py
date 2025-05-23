@@ -26,8 +26,9 @@ class VideoCollection:
         return sorted(self.videos, key=lambda x: x.base_name, reverse=reverse)
 
     def print_info(self) -> None:
-        print(f"number of videos: {self.size()}")
-        print(f"total duration: {self.total_duration/60} minutes")
-        print(f"average duration: {self.average_duration} seconds")
-        print(f"min width/height: {self.min_width} / {self.min_height}")
-        print(f"max width/height: {self.max_width} / {self.max_height}")
+        print(f"video collection info:")
+        print(f"\tnumber of videos: {self.size()}")
+        print(f"\ttotal duration: {self.total_duration/60} minutes")
+        print(f"\taverage duration: {self.average_duration} seconds")
+        print(f"\tmin width/height: {self.min_width} / {self.min_height}")
+        print(f"\tmax width/height: {self.max_width} / {self.max_height}")

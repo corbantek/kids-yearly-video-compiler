@@ -33,7 +33,6 @@ class VideoInfo:
 
 
 def get_all_video_info(path: str) -> List[VideoInfo]:
-    print(f"reading video input directory: {path}")
     video_file_names = [
         video_file_name
         for video_file_name in os.listdir(path)

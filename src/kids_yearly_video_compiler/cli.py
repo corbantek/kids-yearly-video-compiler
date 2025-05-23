@@ -18,14 +18,17 @@ def kids_yearly_video_compiler(config_path=None) -> None:
     global config
     config = load_configuration(config_path)
 
+    print(f"loading videos from {config.directories.input_videos}")
     videos = get_all_video_info(config.directories.input_videos)
+
     video_collection = VideoCollection(videos)
     video_collection.print_info()
 
     if config.compiler_options.list_weeks:
+        print(f"please verify any missing weeks for {config.kid_info.name} since {config.kid_info.birthday}")
         for video in video_collection.sorted():
             print(
-                f"{video.get_since_birthday(config.kid_info.birthday)}\t {video.base_name} "
+                f"\t{video.get_since_birthday(config.kid_info.birthday)}\t {video.base_name} "
             )
 
     video_collection_compiler = VideoCollectionCompiler(config, video_collection)

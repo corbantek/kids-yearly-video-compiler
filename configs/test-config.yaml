@@ -3,7 +3,7 @@ kid_info:
   birthday: "2023-01-01"
 directories:
   input_videos: "./functional_tests/input/"
-  output_video: "./functional_tests/output/"
+  output_video: "./functional_tests/output"
   scratch: "./functional_tests/scratch/"
 timeplapse_video:
   length: 15
