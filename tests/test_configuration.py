@@ -17,14 +17,13 @@ def test_configuration_from_dict():
             'length': 10,
             'max_width': 1280,
             'max_height': 720,
+            'instagram_style': False,
         },
         'timelapse_options': {
             'reverse': True,
             'list_weeks_centered': False,
-            'constant_speed_up_algo': False,
             'speed_up_factor': 5.0,
             'head_tail_ratio': [3, 2],
-            'instagram_style': False,
         },
         'compiler_options': {
             'list_weeks': False,
@@ -39,10 +38,9 @@ def test_configuration_from_dict():
     assert config.timelapse_video.length == 10
     assert config.timelapse_video.max_width == 1280
     assert config.timelapse_video.max_height == 720
+    assert config.timelapse_video.instagram_style is False
     assert config.timelapse_options.reverse is True
     assert config.timelapse_options.list_weeks_centered is False
-    assert config.timelapse_options.constant_speed_up_algo is False
     assert config.timelapse_options.speed_up_factor == 1 / 5.0
     assert config.timelapse_options.head_tail_ratio == (3, 2)
-    assert config.timelapse_options.instagram_style is False
     assert config.compiler_options.list_weeks is False

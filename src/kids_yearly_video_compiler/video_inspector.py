@@ -44,7 +44,7 @@ def get_all_video_info(path: str) -> List[VideoInfo]:
     ]
 
 
-def get_video_info(path: str, video_file_name: str) -> VideoInfo:
+def get_video_info(path: str, video_file_name: str, base_name: str = None) -> VideoInfo:
     video_file_path = f"{path}{video_file_name}"
     probe = ffmpeg.probe(video_file_path)
     video = next(
@@ -60,7 +60,7 @@ def get_video_info(path: str, video_file_name: str) -> VideoInfo:
         return VideoInfo()
     return VideoInfo(
         date_taken=video_date,
-        base_name=video_file_name,
+        base_name=base_name or video_file_name.split(".")[0],
         file_path=video_file_path,
         duration=float(video["duration"]),
         width=int(video["width"]),

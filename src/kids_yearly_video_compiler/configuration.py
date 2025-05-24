@@ -20,19 +20,25 @@ class TimelapseVideo:
     length: int = 15
     max_width: int = 1920
     max_height: int = 1080
+    instagram_style: bool = False
 
 @dataclass
 class TimelapseOptions:
     reverse: bool = False
     list_weeks_centered: bool = True
-    constant_speed_up_algo: bool = True
     speed_up_factor: float = 1 / 7.5
     head_tail_ratio: Tuple[int, int] = (2, 1)
-    instagram_style: bool = True
+    video_stabilization: bool = False
+
+@dataclass
+class TimelapseStabilizationOptions:
+    shakiness: int = 5
+    smoothing: int = 10
 
 @dataclass
 class CompilerOptions:
-    list_weeks: bool = True
+    show_ffmpeg_commands: bool = False
+    list_weeks: bool = False
 
 @dataclass
 class Configuration:
@@ -40,6 +46,7 @@ class Configuration:
     directories: Directories = field(default_factory=Directories)
     timelapse_video: TimelapseVideo = field(default_factory=TimelapseVideo)
     timelapse_options: TimelapseOptions = field(default_factory=TimelapseOptions)
+    timelapse_stabilization_options: TimelapseStabilizationOptions = field(default_factory=TimelapseStabilizationOptions)
     compiler_options: CompilerOptions = field(default_factory=CompilerOptions)
 
     @staticmethod
@@ -50,16 +57,22 @@ class Configuration:
         directories_data = data.get('directories', {})
         timelapse_video_data = data.get('timelapse_video', {})
         timelapse_options_data = data.get('timelapse_options', {})
+        timelapse_stabilization_options_data =  data.get('timelapse_stabilization_options', {})
+        compiler_options_data = data.get('compiler_options', {})
+
+        # yaml to python conversion
         if 'head_tail_ratio' in timelapse_options_data and isinstance(timelapse_options_data['head_tail_ratio'], list):
             timelapse_options_data['head_tail_ratio'] = tuple(timelapse_options_data['head_tail_ratio'])
         if 'speed_up_factor' in timelapse_options_data and isinstance(timelapse_options_data['speed_up_factor'], float):
             timelapse_options_data['speed_up_factor'] = 1.0/float(timelapse_options_data['speed_up_factor'])
-        compiler_options_data = data.get('compiler_options', {})
+
+
         return Configuration(
             kid_info=KidInfo(**kid_info_data),
             directories=Directories(**directories_data),
             timelapse_video=TimelapseVideo(**timelapse_video_data),
             timelapse_options=TimelapseOptions(**timelapse_options_data),
+            timelapse_stabilization_options=TimelapseStabilizationOptions(**timelapse_stabilization_options_data),
             compiler_options=CompilerOptions(**compiler_options_data),
         )
 

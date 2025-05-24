@@ -1,6 +1,6 @@
 from datetime import datetime
 import os
-from typing import List
+from typing import List, Tuple
 
 import ffmpeg
 from ffmpeg.nodes import Stream
@@ -14,7 +14,11 @@ class VideoCollectionCompiler:
         self.config = config
         self.video_collection = video_collection
 
-        self.scratch_video_collection: VideoCollection = None
+        self.compiled_video_collection: VideoCollection = None
+
+    def _print_ffmpeg_command(self, command: Stream):
+        if self.config.compiler_options.show_ffmpeg_commands:
+            print("ffmpeg command:", " ".join(command.compile()))
 
     def save(self):
         output_video_path = f"{self.config.directories.output_video}/{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}-{self.config.kid_info.name.replace(' ', '-')}.mp4"
@@ -23,7 +27,7 @@ class VideoCollectionCompiler:
             ffmpeg.concat(
                 *[
                     ffmpeg.input(scratch_video.file_path)
-                    for scratch_video in self.scratch_video_collection.sorted(
+                    for scratch_video in self.compiled_video_collection.sorted(
                         reverse=self.config.timelapse_options.reverse
                     )
                 ]
@@ -51,16 +55,22 @@ class VideoCollectionCompiler:
             video_part_length * self.config.timelapse_options.head_tail_ratio[1]
         )
 
-        scratch_videos: List[VideoInfo] = []
+        unstabilized_videos: List[VideoInfo] = []
         for video in self.video_collection.sorted():
-            output_file_name = f"scratch_{video.base_name}"
-            output_file_path = f"{self.config.directories.scratch}{output_file_name}"
+            (
+                unstabilized_file_name,
+                unstabilized_file_path,
+            ) = self._get_unstabilized_video_file_path(video)
 
-            print(f"compiling scratch video for {video.base_name}")
-            if os.path.isfile(output_file_path):
-                print(f"\tskipping {video.base_name} because it already exists")
-                scratch_videos.append(
-                    get_video_info(self.config.directories.scratch, output_file_name)
+            print(f"compiling unstabilized video for {video.base_name}")
+            if os.path.isfile(unstabilized_file_path):
+                print(f"\tskipping {unstabilized_file_name} because it already exists")
+                unstabilized_videos.append(
+                    get_video_info(
+                        self.config.directories.scratch,
+                        unstabilized_file_name,
+                        video.base_name,
+                    )
                 )
                 continue
 
@@ -90,23 +100,9 @@ class VideoCollectionCompiler:
                     )
                     .filter("scale", self.config.timelapse_video.max_width, -1)
                 )
-                if video.hdr:
-                    print(f"\tfixing contrast for hdr video {video.base_name}")
-                    video_head = self._hdr_to_sdr_filter(video_head)
-                    video_tail = self._hdr_to_sdr_filter(video_tail)
-
-                if self.config.timelapse_options.instagram_style:
-                    video_head = self._instagram_style_filter(video_head)
-                    video_tail = self._instagram_style_filter(video_tail)
-
-                video_head = self._draw_birthday_week(
-                    video_head, video, self.config.timelapse_options.list_weeks_centered
+                self._save(
+                    ffmpeg.concat(video_head, video_tail), unstabilized_file_path
                 )
-                video_tail = self._draw_birthday_week(
-                    video_tail, video, self.config.timelapse_options.list_weeks_centered
-                )
-
-                self._save(ffmpeg.concat(video_head, video_tail), output_file_path)
             else:
                 # sped up video length is shorter than max_video_length, we can speed up the entire video
                 speed_up_factor = (
@@ -120,22 +116,68 @@ class VideoCollectionCompiler:
                     .filter("setpts", str(speed_up_factor) + "*PTS")
                     .filter("scale", self.config.directories.output_video.width, -1)
                 )
-                if video.hdr:
-                    video_full = self._hdr_to_sdr_filter(video_full)
+                self._save(video_full, unstabilized_file_path)
 
-                if self.config.timelapse_options.instagram_style:
-                    video_full = self._instagram_style_filter(video_full)
-
-                video_full = self._draw_birthday_week(
-                    video_full, video, self.config.timelapse_options.list_weeks_centered
+            unstabilized_videos.append(
+                get_video_info(
+                    self.config.directories.scratch,
+                    unstabilized_file_name,
+                    video.base_name,
                 )
-
-                self._save(video_full, output_file_path)
-            scratch_videos.append(
-                get_video_info(self.config.directories.scratch, output_file_name)
             )
         # store our scratch videos in a collection so we can combine them into a final video
-        self.scratch_video_collection = VideoCollection(scratch_videos)
+        unstabilized_video_collection = VideoCollection(unstabilized_videos)
+
+        pre_filtered_video_collection = (
+            self._apply_video_stabilization(unstabilized_video_collection)
+            if self.config.timelapse_options.video_stabilization
+            else unstabilized_video_collection
+        )
+        self.compiled_video_collection = self._apply_video_filters(
+            pre_filtered_video_collection
+        )
+
+    def _apply_video_filters(
+        self, video_collection: VideoCollection
+    ) -> VideoCollection:
+        compiled_videos: List[VideoInfo] = []
+        for video in video_collection.sorted():
+            print(f"applying filters to {video.file_path}")
+            compiled_file_name, compiled_file_path = self._get_compiled_video_file_path(
+                video
+            )
+            if os.path.isfile(compiled_file_path):
+                print(f"\tskipping {compiled_file_name} because it already exists")
+                compiled_videos.append(
+                    get_video_info(
+                        self.config.directories.scratch,
+                        compiled_file_name,
+                        video.base_name,
+                    )
+                )
+                continue
+            stream = ffmpeg.input(video.file_path)
+            stream = self._apply_filters(stream, video)
+            self._save(stream, compiled_file_path)
+            compiled_videos.append(
+                get_video_info(
+                    self.config.directories.scratch, compiled_file_name, video.base_name
+                )
+            )
+        return VideoCollection(compiled_videos)
+
+    def _apply_filters(self, stream: Stream, video: VideoInfo) -> Stream:
+        if video.hdr:
+            print(f"\tfixing contrast for hdr video {video.file_path}")
+            stream = self._hdr_to_sdr_filter(stream)
+
+        if self.config.timelapse_video.instagram_style:
+            stream = self._instagram_style_filter(stream)
+
+        stream = self._draw_birthday_week(
+            stream, video, self.config.timelapse_options.list_weeks_centered
+        )
+        return stream
 
     def _hdr_to_sdr_filter(self, stream: Stream) -> Stream:
         return (
@@ -150,11 +192,11 @@ class VideoCollectionCompiler:
     def _instagram_style_filter(self, stream: Stream) -> Stream:
         return stream.filter(
             "crop",
-            self.config.directories.output_video.height * (9 / 16),
-            self.config.directories.output_video.height,
+            self.config.timelapse_video.max_height * (9 / 16),
+            self.config.timelapse_video.max_height,
             (
-                self.config.directories.output_video.width
-                - (self.config.directories.output_video.height * (9 / 16))
+                self.config.timelapse_video.max_width
+                - (self.config.timelapse_video.max_height * (9 / 16))
             )
             / 2,
             0,
@@ -190,3 +232,98 @@ class VideoCollectionCompiler:
                 pix_fmt="yuv420p",
             ).run(quiet=True)
         )
+
+    def _get_compiled_video_file_path(self, video: VideoInfo) -> Tuple[str, str]:
+        compiled_file_name = f"{video.base_name}-compiled.mp4"
+        return (
+            compiled_file_name,
+            f"{self.config.directories.scratch}/{compiled_file_name}",
+        )
+
+    def _get_unstabilized_video_file_path(self, video: VideoInfo) -> Tuple[str, str]:
+        unstabilized_file_name = f"{video.base_name}-unstabilized.mp4"
+        return (
+            unstabilized_file_name,
+            f"{self.config.directories.scratch}/{unstabilized_file_name}",
+        )
+
+    def _get_stabilization_data_file_path(self, video: VideoInfo) -> str:
+        return (
+            f"{self.config.directories.scratch}/{video.base_name}-stabilized-data.trf"
+        )
+
+    def _get_stabilized_video_file_path(self, video: VideoInfo) -> Tuple[str, str]:
+        stabilized_file_name = f"{video.base_name}-stabilized.mp4"
+        return (
+            stabilized_file_name,
+            f"{self.config.directories.scratch}/{stabilized_file_name}",
+        )
+
+    def _apply_video_stabilization(
+        self, unstabilized_video_collection: VideoCollection
+    ) -> VideoCollection:
+        for video in unstabilized_video_collection.sorted():
+            print(f"detecting video stabilization for {video.file_path}")
+            stabilization_data_file_path = self._get_stabilization_data_file_path(video)
+            if os.path.isfile(stabilization_data_file_path):
+                print(
+                    f"\tskipping detection of {video.file_path} stabilization because it already exists"
+                )
+                continue
+
+            command = (
+                ffmpeg.input(video.file_path)
+                .filter(
+                    "vidstabdetect",
+                    shakiness=self.config.timelapse_stabilization_options.shakiness,
+                    result=stabilization_data_file_path,
+                )
+                .output("-", f="null")
+            )
+            # command = ffmpeg.input(video.file_path).output(
+            #     "-",
+            #     vf=f"vidstabdetect=shakiness={self.config.timelapse_stabilization_options.shakiness}:result='{self._get_stabilization_data_file_path(video)}'",
+            #     f="null",
+            # )
+            self._print_ffmpeg_command(command)
+            command.run(quiet=True)
+
+        stabilized_videos: List[VideoInfo] = []
+        for video in unstabilized_video_collection.sorted():
+            (
+                stabilized_file_name,
+                stabilized_file_path,
+            ) = self._get_stabilized_video_file_path(video)
+            print(f"stabilizing video {video.file_path}")
+            if os.path.isfile(stabilized_file_path):
+                print(
+                    f"\tskipping {stabilized_file_name} stabilization because it already exists"
+                )
+                stabilized_videos.append(
+                    get_video_info(
+                        self.config.directories.scratch,
+                        stabilized_file_name,
+                        video.base_name,
+                    )
+                )
+                continue
+
+            command = (
+                ffmpeg.input(video.file_path)
+                .filter(
+                    "vidstabtransform",
+                    smoothing=self.config.timelapse_stabilization_options.smoothing,
+                    input=self._get_stabilization_data_file_path(video),
+                )
+                .output(stabilized_file_path)
+            )
+            self._print_ffmpeg_command(command)
+            command.run(quiet=True)
+            stabilized_videos.append(
+                get_video_info(
+                    self.config.directories.scratch,
+                    stabilized_file_name,
+                    video.base_name,
+                )
+            )
+        return VideoCollection(stabilized_videos)

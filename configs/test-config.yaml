@@ -5,16 +5,20 @@ directories:
   input_videos: "./functional_tests/input/"
   output_video: "./functional_tests/output"
   scratch: "./functional_tests/scratch/"
-timeplapse_video:
+timelapse_video:
   length: 15
   max_width: 1920
   max_height: 1080
+  instagram_style: false
 timelapse_options:
   reverse: false
   list_weeks_centered: true
-  constant_speed_up_algo: true
   speed_up_factor: 7.5
   head_tail_ratio: [2, 1]
-  instagram_style: false
+  video_stabilization: true
+timelapse_stabilization_options:
+  shakiness: 5
+  smoothing: 10
 compiler_options:
-  list_weeks: true
+  list_weeks: false
+  show_ffmpeg_commands: false
