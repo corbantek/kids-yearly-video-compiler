@@ -32,8 +32,8 @@ class TimelapseOptions:
 
 @dataclass
 class TimelapseStabilizationOptions:
-    shakiness: int = 5
-    smoothing: int = 10
+    shakiness: int = 5  # 1-10
+    smoothing: int = 10  # number of forwards and backwards frames +1 to use for smoothing
 
 @dataclass
 class CompilerOptions:

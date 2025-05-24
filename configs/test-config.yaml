@@ -17,7 +17,7 @@ timelapse_options:
   head_tail_ratio: [2, 1]
   video_stabilization: true
 timelapse_stabilization_options:
-  shakiness: 5
+  shakiness: 10
   smoothing: 10
 compiler_options:
   list_weeks: false
