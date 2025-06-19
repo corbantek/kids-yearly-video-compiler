@@ -172,7 +172,7 @@ class VideoCollectionCompiler:
         )
 
         return self._transform(
-            "head-tail", original_video_collection, self._transform_head_tail_algorithm, {"max_video_length": max_video_length, "head_length": head_length, "tail_length": tail_length}
+            "head-tail-algorithm", original_video_collection, self._transform_head_tail_algorithm, {"max_video_length": max_video_length, "head_length": head_length, "tail_length": tail_length}
         )
 
     def _transform_video_filters(
