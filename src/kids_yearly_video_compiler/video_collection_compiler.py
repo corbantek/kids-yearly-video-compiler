@@ -1,6 +1,6 @@
 from datetime import datetime
 import os
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
 import ffmpeg
 from ffmpeg.nodes import Stream
@@ -20,10 +20,61 @@ class VideoCollectionCompiler:
         if self.config.compiler_options.show_ffmpeg_commands:
             print("ffmpeg command:", " ".join(command.compile()))
 
+    def _get_transformed_video_file_path(
+        self, transform_name: str, video: VideoInfo
+    ) -> Tuple[str, str]:
+        transformed_file_name = f"{video.base_name}-{transform_name}.mp4"
+        return (
+            transformed_file_name,
+            f"{self.config.directories.scratch}/{transformed_file_name}",
+        )
+
+    # TODO move this to video collection
+    def _transform(
+        self,
+        transform_name: str,
+        video_collection: VideoCollection,
+        transform_video_function: Callable[[VideoInfo, str, dict], Stream],
+        transform_argument_functions: dict[Callable, str] = {},
+    ) -> VideoCollection:
+        transformed_videos: List[VideoInfo] = []
+        print(f"applying {transform_name} to {video_collection.size()} videos")
+        for video in video_collection.sorted():
+            print(f"\tapplying {transform_name} to {video.file_path}")
+            (
+                transformed_file_name,
+                transformed_file_path,
+            ) = self._get_transformed_video_file_path(transform_name, video)
+            if os.path.isfile(transformed_file_path):
+                print(f"\tskipping {transformed_file_name} because it already exists")
+                transformed_videos.append(
+                    get_video_info(
+                        self.config.directories.scratch,
+                        transformed_file_name,
+                        video.base_name,
+                    )
+                )
+                continue
+
+            command = transform_video_function(
+                video, transformed_file_path, transform_argument_functions
+            )
+            self._print_ffmpeg_command(command)
+            command.run(quiet=True)
+
+            transformed_videos.append(
+                get_video_info(
+                    self.config.directories.scratch,
+                    transformed_file_name,
+                    video.base_name,
+                )
+            )
+        return VideoCollection(transformed_videos)
+
     def save(self):
-        output_video_path = f"{self.config.directories.output_video}/{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}-{self.config.kid_info.name.replace(' ', '-')}.mp4"
+        output_video_path = os.path.join(self.config.directories.output_video, f"{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}-{self.config.kid_info.name.replace(' ', '-')}.mp4")
         print(f"saving final video to {output_video_path}")
-        (
+        command = (
             ffmpeg.concat(
                 *[
                     ffmpeg.input(scratch_video.file_path)
@@ -34,13 +85,14 @@ class VideoCollectionCompiler:
             )
             .output(output_video_path)
             .overwrite_output()
-            .run(quiet=True)
         )
+        self._print_ffmpeg_command(command)
+        command.run(quiet=True)
 
     def compile(self):
         # max_video_length is the length is the max length each video **will** be after being sped up
         max_video_length = (
-            self.config.timelapse_video.length / self.video_collection.size()
+            self.config.timelapse_video.get_length_in_seconds() / self.video_collection.size()
         ) / self.config.timelapse_options.speed_up_factor
 
         video_parts = (
@@ -48,6 +100,7 @@ class VideoCollectionCompiler:
             + self.config.timelapse_options.head_tail_ratio[1]
         )
         video_part_length = max_video_length / video_parts
+
         head_length = (
             video_part_length * self.config.timelapse_options.head_tail_ratio[0]
         )
@@ -102,7 +155,7 @@ class VideoCollectionCompiler:
                 )
                 self._save(
                     ffmpeg.concat(video_head, video_tail), unstabilized_file_path
-                )
+                ).run(quiet=True)
             else:
                 # sped up video length is shorter than max_video_length, we can speed up the entire video
                 speed_up_factor = (
@@ -116,7 +169,7 @@ class VideoCollectionCompiler:
                     .filter("setpts", str(speed_up_factor) + "*PTS")
                     .filter("scale", self.config.directories.output_video.width, -1)
                 )
-                self._save(video_full, unstabilized_file_path)
+                self._save(video_full, unstabilized_file_path).run(quiet=True)
 
             unstabilized_videos.append(
                 get_video_info(
@@ -133,38 +186,17 @@ class VideoCollectionCompiler:
             if self.config.timelapse_options.video_stabilization
             else unstabilized_video_collection
         )
-        self.compiled_video_collection = self._apply_video_filters(
-            pre_filtered_video_collection
+        self.compiled_video_collection = self._transform(
+            "compiled", pre_filtered_video_collection, self._transform_video_filters
         )
 
-    def _apply_video_filters(
-        self, video_collection: VideoCollection
-    ) -> VideoCollection:
-        compiled_videos: List[VideoInfo] = []
-        for video in video_collection.sorted():
-            print(f"applying filters to {video.file_path}")
-            compiled_file_name, compiled_file_path = self._get_compiled_video_file_path(
-                video
-            )
-            if os.path.isfile(compiled_file_path):
-                print(f"\tskipping {compiled_file_name} because it already exists")
-                compiled_videos.append(
-                    get_video_info(
-                        self.config.directories.scratch,
-                        compiled_file_name,
-                        video.base_name,
-                    )
-                )
-                continue
-            stream = ffmpeg.input(video.file_path)
-            stream = self._apply_filters(stream, video)
-            self._save(stream, compiled_file_path)
-            compiled_videos.append(
-                get_video_info(
-                    self.config.directories.scratch, compiled_file_name, video.base_name
-                )
-            )
-        return VideoCollection(compiled_videos)
+
+    def _transform_video_filters(
+        self, video: VideoInfo, output_file_path: str, transform_arguments: dict = {}
+    ) -> Stream:
+        stream = ffmpeg.input(video.file_path)
+        stream = self._apply_filters(stream, video)
+        return self._save(stream, output_file_path)
 
     def _apply_filters(self, stream: Stream, video: VideoInfo) -> Stream:
         if video.hdr:
@@ -224,20 +256,11 @@ class VideoCollectionCompiler:
             )
 
     def _save(self, stream: Stream, output_file_path: str) -> Stream:
-        (
-            stream.output(
-                output_file_path,
-                r="30000/1001",
-                vcodec="libx264",
-                pix_fmt="yuv420p",
-            ).run(quiet=True)
-        )
-
-    def _get_compiled_video_file_path(self, video: VideoInfo) -> Tuple[str, str]:
-        compiled_file_name = f"{video.base_name}-compiled.mp4"
-        return (
-            compiled_file_name,
-            f"{self.config.directories.scratch}/{compiled_file_name}",
+        return stream.output(
+            output_file_path,
+            r="30000/1001",
+            vcodec="libx264",
+            pix_fmt="yuv420p",
         )
 
     def _get_unstabilized_video_file_path(self, video: VideoInfo) -> Tuple[str, str]:
@@ -252,12 +275,6 @@ class VideoCollectionCompiler:
             f"{self.config.directories.scratch}/{video.base_name}-stabilized-data.trf"
         )
 
-    def _get_stabilized_video_file_path(self, video: VideoInfo) -> Tuple[str, str]:
-        stabilized_file_name = f"{video.base_name}-stabilized.mp4"
-        return (
-            stabilized_file_name,
-            f"{self.config.directories.scratch}/{stabilized_file_name}",
-        )
 
     def _apply_video_stabilization(
         self, unstabilized_video_collection: VideoCollection
@@ -280,50 +297,25 @@ class VideoCollectionCompiler:
                 )
                 .output("-", f="null")
             )
-            # command = ffmpeg.input(video.file_path).output(
-            #     "-",
-            #     vf=f"vidstabdetect=shakiness={self.config.timelapse_stabilization_options.shakiness}:result='{self._get_stabilization_data_file_path(video)}'",
-            #     f="null",
-            # )
             self._print_ffmpeg_command(command)
             command.run(quiet=True)
 
-        stabilized_videos: List[VideoInfo] = []
-        for video in unstabilized_video_collection.sorted():
-            (
-                stabilized_file_name,
-                stabilized_file_path,
-            ) = self._get_stabilized_video_file_path(video)
-            print(f"stabilizing video {video.file_path}")
-            if os.path.isfile(stabilized_file_path):
-                print(
-                    f"\tskipping {stabilized_file_name} stabilization because it already exists"
-                )
-                stabilized_videos.append(
-                    get_video_info(
-                        self.config.directories.scratch,
-                        stabilized_file_name,
-                        video.base_name,
-                    )
-                )
-                continue
+        return self._transform(
+            "stabilized",
+            unstabilized_video_collection,
+            self._transform_video_stabilization,
+            {"stabilization_data_file_path": self._get_stabilization_data_file_path},
+        )
 
-            command = (
-                ffmpeg.input(video.file_path)
-                .filter(
-                    "vidstabtransform",
-                    smoothing=self.config.timelapse_stabilization_options.smoothing,
-                    input=self._get_stabilization_data_file_path(video),
-                )
-                .output(stabilized_file_path)
+    def _transform_video_stabilization(
+        self, video: VideoInfo, output_file_path: str, transform_arguments: dict = {}
+    ) -> Stream:
+        return (
+            ffmpeg.input(video.file_path)
+            .filter(
+                "vidstabtransform",
+                smoothing=self.config.timelapse_stabilization_options.smoothing,
+                input=transform_arguments["stabilization_data_file_path"](video),
             )
-            self._print_ffmpeg_command(command)
-            command.run(quiet=True)
-            stabilized_videos.append(
-                get_video_info(
-                    self.config.directories.scratch,
-                    stabilized_file_name,
-                    video.base_name,
-                )
-            )
-        return VideoCollection(stabilized_videos)
+            .output(output_file_path)
+        )
