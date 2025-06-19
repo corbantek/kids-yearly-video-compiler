@@ -90,6 +90,69 @@ class VideoCollectionCompiler:
         command.run(quiet=True)
 
     def compile(self):
+        # apply head-tail algorithm
+        head_tail_algorithm_collection = self._apply_head_tail_algorithm(self.video_collection)
+
+        # apply video stabilization
+        pre_filtered_video_collection = (
+            self._apply_video_stabilization(head_tail_algorithm_collection)
+            if self.config.timelapse_options.video_stabilization
+            else head_tail_algorithm_collection
+        )
+
+        # apply video filters
+        self.compiled_video_collection = self._transform(
+            "video-filters", pre_filtered_video_collection, self._transform_video_filters
+        )
+
+    def _transform_head_tail_algorithm(self, video: VideoInfo, output_file_path: str, transform_arguments: dict = {}) -> Stream:
+        if (
+            video.duration > transform_arguments["max_video_length"]
+        ):  # TODO this calculation is wrong, we need to take into account the speed up factor
+            # video length is longer than max_video_length, we need to split it into head and tail
+            video_head = (
+                ffmpeg.input(video.file_path, **{"noautorotate": None})
+                .trim(duration=transform_arguments["head_length"])
+                .filter(
+                    "setpts",
+                    str(self.config.timelapse_options.speed_up_factor) + "*PTS",
+                )
+                .filter("scale", self.config.timelapse_video.max_width, -1)
+            )
+            video_tail = (
+                ffmpeg.input(
+                    video.file_path,
+                    **{"noautorotate": None},
+                    ss=video.duration - transform_arguments["tail_length"],
+                )
+                .trim(duration=transform_arguments["tail_length"])
+                .filter(
+                    "setpts",
+                    str(self.config.timelapse_options.speed_up_factor) + "*PTS",
+                )
+                .filter("scale", self.config.timelapse_video.max_width, -1)
+            )
+            return self._save(
+                ffmpeg.concat(video_head, video_tail), output_file_path
+            )
+        else:
+            # sped up video length is shorter than max_video_length, we can speed up the entire video to fit the max length
+            speed_up_factor = (
+                self.config.directories.timelapse_options.speed_up_factor
+                * transform_arguments["max_video_length"]
+            ) / video.duration
+            # if the speed up factor is greater than 1.0, we need to set it to 1.0 so we aren't in slow motion
+            # (its okay if the video is shorter than the max length)
+            if speed_up_factor > 1.0:
+                speed_up_factor = 1.0
+            video_full = (
+                ffmpeg.input(video.file_path, **{"noautorotate": None})
+                .filter("setpts", str(speed_up_factor) + "*PTS")
+                .filter("scale", self.config.directories.output_video.width, -1)
+            )
+            return self._save(video_full, output_file_path)
+
+    def _apply_head_tail_algorithm(self, original_video_collection: VideoCollection) -> VideoCollection:
         # max_video_length is the length is the max length each video **will** be after being sped up
         max_video_length = (
             self.config.timelapse_video.get_length_in_seconds() / self.video_collection.size()
@@ -108,88 +171,9 @@ class VideoCollectionCompiler:
             video_part_length * self.config.timelapse_options.head_tail_ratio[1]
         )
 
-        unstabilized_videos: List[VideoInfo] = []
-        for video in self.video_collection.sorted():
-            (
-                unstabilized_file_name,
-                unstabilized_file_path,
-            ) = self._get_unstabilized_video_file_path(video)
-
-            print(f"compiling unstabilized video for {video.base_name}")
-            if os.path.isfile(unstabilized_file_path):
-                print(f"\tskipping {unstabilized_file_name} because it already exists")
-                unstabilized_videos.append(
-                    get_video_info(
-                        self.config.directories.scratch,
-                        unstabilized_file_name,
-                        video.base_name,
-                    )
-                )
-                continue
-
-            if (
-                video.duration > max_video_length
-            ):  # TODO this calculation is wrong, we need to take into account the speed up factor
-                # video length is longer than max_video_length, we need to split it into head and tail
-                video_head = (
-                    ffmpeg.input(video.file_path, **{"noautorotate": None})
-                    .trim(duration=head_length)
-                    .filter(
-                        "setpts",
-                        str(self.config.timelapse_options.speed_up_factor) + "*PTS",
-                    )
-                    .filter("scale", self.config.timelapse_video.max_width, -1)
-                )
-                video_tail = (
-                    ffmpeg.input(
-                        video.file_path,
-                        **{"noautorotate": None},
-                        ss=video.duration - tail_length,
-                    )
-                    .trim(duration=tail_length)
-                    .filter(
-                        "setpts",
-                        str(self.config.timelapse_options.speed_up_factor) + "*PTS",
-                    )
-                    .filter("scale", self.config.timelapse_video.max_width, -1)
-                )
-                self._save(
-                    ffmpeg.concat(video_head, video_tail), unstabilized_file_path
-                ).run(quiet=True)
-            else:
-                # sped up video length is shorter than max_video_length, we can speed up the entire video
-                speed_up_factor = (
-                    self.config.directories.timelapse_options.speed_up_factor
-                    * max_video_length
-                ) / video.duration
-                if speed_up_factor > 1.0:
-                    speed_up_factor = 1.0
-                video_full = (
-                    ffmpeg.input(video.file_path, **{"noautorotate": None})
-                    .filter("setpts", str(speed_up_factor) + "*PTS")
-                    .filter("scale", self.config.directories.output_video.width, -1)
-                )
-                self._save(video_full, unstabilized_file_path).run(quiet=True)
-
-            unstabilized_videos.append(
-                get_video_info(
-                    self.config.directories.scratch,
-                    unstabilized_file_name,
-                    video.base_name,
-                )
-            )
-        # store our scratch videos in a collection so we can combine them into a final video
-        unstabilized_video_collection = VideoCollection(unstabilized_videos)
-
-        pre_filtered_video_collection = (
-            self._apply_video_stabilization(unstabilized_video_collection)
-            if self.config.timelapse_options.video_stabilization
-            else unstabilized_video_collection
+        return self._transform(
+            "head-tail", original_video_collection, self._transform_head_tail_algorithm, {"max_video_length": max_video_length, "head_length": head_length, "tail_length": tail_length}
         )
-        self.compiled_video_collection = self._transform(
-            "compiled", pre_filtered_video_collection, self._transform_video_filters
-        )
-
 
     def _transform_video_filters(
         self, video: VideoInfo, output_file_path: str, transform_arguments: dict = {}
