@@ -45,8 +45,14 @@ def get_all_video_info(path: str) -> List[VideoInfo]:
 
 
 def get_video_info(path: str, video_file_name: str, base_name: str = None) -> VideoInfo:
-    video_file_path = f"{path}{video_file_name}"
-    probe = ffmpeg.probe(video_file_path)
+    video_file_path = os.path.join(path, video_file_name)
+    try:
+        probe = ffmpeg.probe(video_file_path)
+    except ffmpeg.Error as e:
+        print(f"error probing {video_file_name}: {e}")
+        print(f"ffprobe error: {e.stderr.decode('utf-8')}")
+        exit(1)
+
     video = next(
         (stream for stream in probe["streams"] if stream["codec_type"] == "video"), None
     )

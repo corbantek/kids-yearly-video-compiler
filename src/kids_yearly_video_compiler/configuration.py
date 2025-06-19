@@ -17,10 +17,45 @@ class Directories:
 
 @dataclass
 class TimelapseVideo:
-    length: int = 15
+    length: str = "15s"
     max_width: int = 1920
     max_height: int = 1080
-    instagram_style: bool = False
+    instagram_style: bool = True
+
+    def get_length_in_seconds(self) -> float:
+        """Parse time string (e.g., '5m', '15s', '1h30m') into seconds."""
+        import re
+
+        # Handle simple cases like "15" (assume seconds)
+        if self.length.isdigit():
+            return float(self.length)
+
+        # Parse time units
+        total_seconds = 0.0
+
+        # Find hours
+        hours_match = re.search(r'(\d+(?:\.\d+)?)h', self.length.lower())
+        if hours_match:
+            total_seconds += float(hours_match.group(1)) * 3600
+
+        # Find minutes
+        minutes_match = re.search(r'(\d+(?:\.\d+)?)m', self.length.lower())
+        if minutes_match:
+            total_seconds += float(minutes_match.group(1)) * 60
+
+        # Find seconds
+        seconds_match = re.search(r'(\d+(?:\.\d+)?)s', self.length.lower())
+        if seconds_match:
+            total_seconds += float(seconds_match.group(1))
+
+        # If no units found, treat as seconds
+        if total_seconds == 0.0:
+            try:
+                total_seconds = float(self.length)
+            except ValueError:
+                raise ValueError(f"Invalid time format: {self.length}")
+
+        return total_seconds
 
 @dataclass
 class TimelapseOptions:

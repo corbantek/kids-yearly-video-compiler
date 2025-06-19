@@ -2,11 +2,11 @@ kid_info:
   name: "Jane Doe"
   birthday: "2023-01-01"
 directories:
-  input_videos: "./functional_tests/input/"
+  input_videos: "./functional_tests/input"
   output_video: "./functional_tests/output"
-  scratch: "./functional_tests/scratch/"
+  scratch: "./functional_tests/scratch"
 timelapse_video:
-  length: 15
+  length: 15s
   max_width: 1920
   max_height: 1080
   instagram_style: false

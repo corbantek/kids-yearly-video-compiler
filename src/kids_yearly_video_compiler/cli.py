@@ -13,6 +13,7 @@ from kids_yearly_video_compiler.video_inspector import get_all_video_info
 def cli():
     parser = argparse.ArgumentParser(description='Generate a yearly video timelapse.')
     parser.add_argument('--config', type=str, help='Path to the configuration file (default: default-config.yaml)')
+    parser.add_argument('--verify-only', action='store_true', help='Verify the videos without compiling')
     parser.add_argument('--clear-stabilized', action='store_true', help='Clear the stabilized videos')
     parser.add_argument('--clear-stabilized-data', action='store_true', help='Clear the stabilization data')
     parser.add_argument('--clear-compiled', action='store_true', help='Clear the compiled videos')
@@ -31,7 +32,7 @@ def cli():
     if args.clear_scratch:
         clear_scratch(config)
 
-    kids_yearly_video_compiler(config)
+    kids_yearly_video_compiler(config, args.verify_only)
 
 def clear_scratch(config: Configuration):
     shutil.rmtree(config.directories.scratch)
@@ -49,7 +50,7 @@ def clear_scratch_file_type(config: Configuration, type: str):
             print(f"error deleting {video_path}: {e}")
     print(f"deleted all {type} videos in {config.directories.scratch}")
 
-def kids_yearly_video_compiler(config: Configuration) -> None:
+def kids_yearly_video_compiler(config: Configuration, verify_only: bool = False) -> None:
     print(f"loading videos from {config.directories.input_videos}")
     videos = get_all_video_info(config.directories.input_videos)
 
@@ -62,6 +63,9 @@ def kids_yearly_video_compiler(config: Configuration) -> None:
             print(
                 f"\t{video.get_since_birthday(config.kid_info.birthday)}\t {video.base_name} "
             )
+
+    if verify_only:
+        return
 
     video_collection_compiler = VideoCollectionCompiler(config, video_collection)
     video_collection_compiler.compile()
