@@ -9,6 +9,7 @@ readme = "README.md"
 python = "^3.8"
 ffmpeg-python = "^0.2.0"
 pyyaml = "^6.0.2"
+tqdm = "^4.67.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

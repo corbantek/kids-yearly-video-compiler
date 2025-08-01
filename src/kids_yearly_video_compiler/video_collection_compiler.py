@@ -3,6 +3,9 @@ import os
 from typing import Callable, List, Tuple
 
 import ffmpeg
+import re
+import subprocess
+from tqdm import tqdm
 from ffmpeg.nodes import Stream
 from kids_yearly_video_compiler.configuration import Configuration
 from kids_yearly_video_compiler.video_collection import VideoCollection
@@ -39,14 +42,31 @@ class VideoCollectionCompiler:
     ) -> VideoCollection:
         transformed_videos: List[VideoInfo] = []
         print(f"applying {transform_name} to {video_collection.size()} videos")
-        for video in video_collection.sorted():
-            print(f"\tapplying {transform_name} to {video.file_path}")
-            (
-                transformed_file_name,
-                transformed_file_path,
-            ) = self._get_transformed_video_file_path(transform_name, video)
-            if os.path.isfile(transformed_file_path):
-                print(f"\tskipping {transformed_file_name} because it already exists")
+        with tqdm(video_collection.sorted(), desc=f"applying {transform_name}", unit="video", colour="green") as pbar:
+            for video in pbar:
+                (
+                    transformed_file_name,
+                    transformed_file_path,
+                ) = self._get_transformed_video_file_path(transform_name, video)
+                if os.path.isfile(transformed_file_path):
+                    transformed_videos.append(
+                        get_video_info(
+                            self.config.directories.scratch,
+                            transformed_file_name,
+                            video.base_name,
+                        )
+                    )
+                    continue
+
+                command = transform_video_function(
+                    video, transformed_file_path, transform_argument_functions
+                )
+                self._print_ffmpeg_command(command)
+                duration = video.duration
+                if "duration" in transform_argument_functions:
+                    duration = transform_argument_functions["duration"]
+                self.run_ffmpeg_with_progress(command.compile(), duration, f"processing {video.base_name}")
+
                 transformed_videos.append(
                     get_video_info(
                         self.config.directories.scratch,
@@ -54,25 +74,67 @@ class VideoCollectionCompiler:
                         video.base_name,
                     )
                 )
-                continue
 
-            command = transform_video_function(
-                video, transformed_file_path, transform_argument_functions
-            )
-            self._print_ffmpeg_command(command)
-            command.run(quiet=True)
-
-            transformed_videos.append(
-                get_video_info(
-                    self.config.directories.scratch,
-                    transformed_file_name,
-                    video.base_name,
-                )
-            )
         return VideoCollection(transformed_videos)
 
+    def run_ffmpeg_with_progress(self, command: List[str], duration: float = None, description: str = "Processing"):
+        """
+        Run FFmpeg command with progress bar
+
+        Args:
+            command: FFmpeg command as list of strings
+            duration: Total duration of processing time in seconds
+            description: Description for progress bar
+        """
+
+        # Start FFmpeg process
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            bufsize=1
+        )
+
+        # Create progress bar
+        with tqdm(
+            total=duration,
+            desc=description,
+            unit="s",
+            #bar_format='{l_bar}{bar}| {n:.1f}/{total:.1f}s [{elapsed}<{remaining}, {rate_fmt}]'
+        ) as pbar:
+
+            # Monitor stderr for progress
+            for line in process.stderr:
+                # Look for time= in FFmpeg output
+                time_match = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', line)
+                if time_match:
+                    hours, minutes, seconds = time_match.groups()
+                    current_time = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+                    # Update progress bar (but don't exceed total)
+                    pbar.n = min(current_time, duration)
+                    pbar.refresh()
+
+                # Also capture any errors
+                if "Error" in line or "error" in line:
+                    pbar.write(f"FFmpeg error: {line.strip()}")
+            pbar.n = duration
+            pbar.refresh()
+
+        # Wait for process to complete
+        return_code = process.wait()
+
+        if return_code != 0:
+            # Get any remaining error output
+            stderr_output = process.stderr.read()
+            raise RuntimeError(f"FFmpeg failed with return code {return_code}: {stderr_output}")
+
+        return return_code
+
     def save(self):
-        output_video_path = os.path.join(self.config.directories.output_video, f"{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}-{self.config.kid_info.name.replace(' ', '-')}.mp4")
+        output_video_name = f"{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}-{self.config.kid_info.name.replace(' ', '-')}.mp4"
+        output_video_path = os.path.join(self.config.directories.output_video, output_video_name)
         print(f"saving final video to {output_video_path}")
         command = (
             ffmpeg.concat(
@@ -87,7 +149,10 @@ class VideoCollectionCompiler:
             .overwrite_output()
         )
         self._print_ffmpeg_command(command)
-        command.run(quiet=True)
+
+        # Calculate total duration for all videos being concatenated
+        total_duration = sum(video.duration for video in self.compiled_video_collection.videos)
+        self.run_ffmpeg_with_progress(command.compile(), total_duration, f"writing {output_video_name}")
 
     def compile(self):
         # apply head-tail algorithm
@@ -153,10 +218,11 @@ class VideoCollectionCompiler:
             return self._save(video_full, output_file_path)
 
     def _apply_head_tail_algorithm(self, original_video_collection: VideoCollection) -> VideoCollection:
-        # max_video_length is the length is the max length each video **will** be after being sped up
-        max_video_length = (
+        duration = (
             self.config.timelapse_video.get_length_in_seconds() / self.video_collection.size()
-        ) / self.config.timelapse_options.speed_up_factor
+        )
+        # max_video_length is the length is the max length each video **will** be after being sped up and speed up factor
+        max_video_length = duration / self.config.timelapse_options.speed_up_factor
 
         video_parts = (
             self.config.timelapse_options.head_tail_ratio[0]
@@ -172,7 +238,7 @@ class VideoCollectionCompiler:
         )
 
         return self._transform(
-            "head-tail-algorithm", original_video_collection, self._transform_head_tail_algorithm, {"max_video_length": max_video_length, "head_length": head_length, "tail_length": tail_length}
+            "head-tail-algorithm", original_video_collection, self._transform_head_tail_algorithm, {"duration": duration, "max_video_length": max_video_length, "head_length": head_length, "tail_length": tail_length}
         )
 
     def _transform_video_filters(
@@ -184,7 +250,7 @@ class VideoCollectionCompiler:
 
     def _apply_filters(self, stream: Stream, video: VideoInfo) -> Stream:
         if video.hdr:
-            print(f"\tfixing contrast for hdr video {video.file_path}")
+            #print(f"\tfixing contrast for hdr video {video.file_path}")
             stream = self._hdr_to_sdr_filter(stream)
 
         if self.config.timelapse_video.instagram_style:
@@ -263,26 +329,25 @@ class VideoCollectionCompiler:
     def _apply_video_stabilization(
         self, unstabilized_video_collection: VideoCollection
     ) -> VideoCollection:
-        for video in unstabilized_video_collection.sorted():
-            print(f"detecting video stabilization for {video.file_path}")
-            stabilization_data_file_path = self._get_stabilization_data_file_path(video)
-            if os.path.isfile(stabilization_data_file_path):
-                print(
-                    f"\tskipping detection of {video.file_path} stabilization because it already exists"
-                )
-                continue
+        print(f"detecting video stabilization for {unstabilized_video_collection.size()} videos")
+        with tqdm(unstabilized_video_collection.sorted(), desc="detecting video stabilization", unit="video", colour="green") as pbar:
+            for video in pbar:
+                stabilization_data_file_path = self._get_stabilization_data_file_path(video)
+                if os.path.isfile(stabilization_data_file_path):
+                    continue
 
-            command = (
-                ffmpeg.input(video.file_path)
-                .filter(
-                    "vidstabdetect",
-                    shakiness=self.config.timelapse_stabilization_options.shakiness,
-                    result=stabilization_data_file_path,
+                command = (
+                    ffmpeg.input(video.file_path)
+                    .filter(
+                        "vidstabdetect",
+                        shakiness=self.config.timelapse_stabilization_options.shakiness,
+                        result=stabilization_data_file_path,
+                    )
+                    .output("-", f="null")
                 )
-                .output("-", f="null")
-            )
-            self._print_ffmpeg_command(command)
-            command.run(quiet=True)
+                self._print_ffmpeg_command(command)
+                ffmpeg_command = command.compile()
+                self.run_ffmpeg_with_progress(ffmpeg_command, video.duration, f"processing {video.base_name}...")
 
         return self._transform(
             "stabilized",
